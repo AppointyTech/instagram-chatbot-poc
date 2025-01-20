@@ -60,5 +60,9 @@ The main components are:
 - `sendInstagramMessage()` - Sends responses back to Instagram
 
 ## Environment Variables Required
-
+- INSTAGRAM_CLIENT_ID
+- INSTAGRAM_CLIENT_SECRET
+- REDIRECT_URI
+- APP_SECRET
+- DATABASE_URL
 
