@@ -38,7 +38,6 @@ type Server struct {
 	logger *log.Logger
 }
 
-// Database schema
 const schema = `
 CREATE TABLE IF NOT EXISTS instagram_users (
     id SERIAL PRIMARY KEY,
@@ -61,13 +60,11 @@ CREATE TABLE IF NOT EXISTS messages (
 );`
 
 func NewServer(config Config) (*Server, error) {
-	// Connect to database
 	db, err := sql.Open("postgres", config.DbURL)
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to database: %v", err)
 	}
 
-	// Create tables
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("error creating schema: %v", err)
 	}
@@ -79,7 +76,6 @@ func NewServer(config Config) (*Server, error) {
 	}, nil
 }
 
-// HTML template for the connect page
 const connectTemplate = `
 <!DOCTYPE html>
 <html>
@@ -149,20 +145,20 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exchange code for token
 	token, err := s.exchangeCodeForToken(code)
 	if err != nil {
 		s.logger.Printf("Error exchanging code for token: %v", err)
 		http.Error(w, "Authorization failed", http.StatusInternalServerError)
 		return
 	}
+
 	upf, err := s.fetchMyUserProfile(token.AccessToken)
 	if err != nil {
 		http.Error(w, "Authorization failed", http.StatusInternalServerError)
 		return
 	}
 	s.logger.Print(upf)
-	// Store token in database
+
 	expiresAt := time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	if err := s.storeToken(token.UserId, token.AccessToken, expiresAt, upf); err != nil {
 		s.logger.Printf("Error storing token: %v", err)
@@ -170,12 +166,10 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Show success page
 	w.Write([]byte("Successfully connected your Instagram account! You can close this window."))
 }
 
 func (s *Server) exchangeCodeForToken(code string) (*InstagramToken, error) {
-	// Make token exchange request
 	resp, err := http.PostForm(
 		"https://api.instagram.com/oauth/access_token",
 		url.Values{
@@ -212,7 +206,6 @@ func (s *Server) storeToken(instagramId int, accessToken string, expiresAt time.
 }
 
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	// To handle verification request
 	if r.Method == "GET" {
 		mode := r.URL.Query().Get("hub.mode")
 		token := r.URL.Query().Get("hub.verify_token")
@@ -231,15 +224,16 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid webhook payload", http.StatusBadRequest)
 		return
 	}
+
 	gr := errgroup.Group{}
 	for _, entry := range event.Entry {
 		for _, msg := range entry.Messaging {
-			gr.Go(
-				func() error {
-					return s.handleMessage(msg.Recipient.ID, msg.Sender.ID, msg.Message.Mid, msg.Message.Text)
-				})
+			gr.Go(func() error {
+				return s.handleMessage(msg.Recipient.ID, msg.Sender.ID, msg.Message.Mid, msg.Message.Text)
+			})
 		}
 	}
+
 	if err := gr.Wait(); err != nil {
 		s.logger.Printf("%v", err)
 	}
@@ -274,7 +268,6 @@ type InstgramUserProfile struct {
 }
 
 func (s *Server) fetchMyUserProfile(accessToken string) (*InstgramUserProfile, error) {
-	// Make request to Instagram API
 	resp, err := http.Get("https://graph.instagram.com/v21.0/me?fields=user_id,username&access_token=" + accessToken)
 	if err != nil {
 		s.logger.Printf("Error fetching profile: %v", err)
@@ -282,7 +275,6 @@ func (s *Server) fetchMyUserProfile(accessToken string) (*InstgramUserProfile, e
 	}
 	defer resp.Body.Close()
 
-	// Parse response
 	var upf *InstgramUserProfile
 	if err := json.NewDecoder(resp.Body).Decode(&upf); err != nil {
 		s.logger.Printf("Error decoding response: %v", err)
@@ -293,7 +285,6 @@ func (s *Server) fetchMyUserProfile(accessToken string) (*InstgramUserProfile, e
 }
 
 func (s *Server) handleMessage(fromID, toID, messageID, text string) error {
-	// Store message
 	_, err := s.db.Exec(`
         INSERT INTO messages (instagram_id, message_id, message_text)
         VALUES ($1, $2, $3)
@@ -303,7 +294,6 @@ func (s *Server) handleMessage(fromID, toID, messageID, text string) error {
 		return err
 	}
 
-	// Get user's access token
 	var accessToken string
 	err = s.db.QueryRow(`
         SELECT access_token 
@@ -315,16 +305,13 @@ func (s *Server) handleMessage(fromID, toID, messageID, text string) error {
 		return err
 	}
 
-	// Get AI response (AI service call will be implemented here)
-	response := "Thank you for your message! This is an automated response."
+	response := getAIResponse(text)
 
-	// Send response back to Instagram
 	if err := s.sendInstagramMessage(toID, response, accessToken); err != nil {
 		s.logger.Printf("Error sending reply: %v", err)
 		return err
 	}
 
-	// Update message with response
 	_, err = s.db.Exec(`
         UPDATE messages 
         SET response_text = $1, processed_at = CURRENT_TIMESTAMP
@@ -335,6 +322,11 @@ func (s *Server) handleMessage(fromID, toID, messageID, text string) error {
 		return err
 	}
 	return nil
+}
+
+func getAIResponse(query string) string {
+	// Implement the calls to AI chatbot here
+	return "Thank you for your message! This is an automated response."
 }
 
 func (s *Server) sendInstagramMessage(recieverId, message, accessToken string) error {
@@ -375,11 +367,6 @@ func (s *Server) sendInstagramMessage(recieverId, message, accessToken string) e
 }
 
 func main() {
-	// Load environment variables
-	//if err := godotenv.Load(); err != nil {
-	//	log.Fatal("Error loading .env file")
-	//}
-
 	config := Config{
 		ClientID:     os.Getenv("INSTAGRAM_CLIENT_ID"),
 		ClientSecret: os.Getenv("INSTAGRAM_CLIENT_SECRET"),
